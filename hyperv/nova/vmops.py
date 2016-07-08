@@ -438,12 +438,13 @@ class VMOps(object):
                 constants._BDI_DEVICE_TYPE_TO_DRIVE_TYPE[eph['device_type']])
 
     def _attach_drive(self, instance_name, path, drive_addr, ctrl_disk_addr,
-                      controller_type, drive_type=constants.DISK):
-        if controller_type == constants.CTRL_TYPE_SCSI:
-            self._vmutils.attach_scsi_drive(instance_name, path, drive_type)
-        else:
-            self._vmutils.attach_ide_drive(instance_name, path, drive_addr,
-                                           ctrl_disk_addr, drive_type)
+                      controller_type, drive_type=constants.DISK, serial=None):
+        self._vmutils.attach_vm_disk(instance_name, path,
+                                     disk_bus=controller_type,
+                                     ctrller_addr=ctrl_disk_addr,
+                                     drive_addr=drive_addr,
+                                     drive_type=drive_type,
+                                     serial=serial)
 
     def get_image_vm_generation(self, instance_id, image_meta):
         image_props = image_meta['properties']
@@ -610,8 +611,7 @@ class VMOps(object):
 
         if configdrive_path:
             self._vmutils.detach_vm_disk(instance_name,
-                                         configdrive_path,
-                                         is_physical=False)
+                                         configdrive_path)
             if delete:
                 self._pathutils.remove(configdrive_path)
 
@@ -881,12 +881,12 @@ class VMOps(object):
 
         controller_type = VM_GENERATIONS_CONTROLLER_TYPES[vm_gen]
 
-        self._vmutils.detach_vm_disk(instance.name, root_vhd_path,
-                                     is_physical=False)
+        self._vmutils.detach_vm_disk(instance.name, root_vhd_path)
         self._attach_drive(instance.name, rescue_vhd_path, 0,
                            self._ROOT_DISK_CTRL_ADDR, controller_type)
-        self._vmutils.attach_scsi_drive(instance.name, root_vhd_path,
-                                        drive_type=constants.DISK)
+        self._attach_drive(instance.name, root_vhd_path,
+                           drive_type=constants.DISK,
+                           disk_bus=constants.CTRL_TYPE_SCSI)
 
         if configdrive.required_by(instance):
             self._detach_config_drive(instance.name)
@@ -917,11 +917,9 @@ class VMOps(object):
         vm_gen = self._vmutils.get_vm_generation(instance.name)
         controller_type = VM_GENERATIONS_CONTROLLER_TYPES[vm_gen]
 
-        self._vmutils.detach_vm_disk(instance.name, root_vhd_path,
-                                     is_physical=False)
+        self._vmutils.detach_vm_disk(instance.name, root_vhd_path)
         if rescue_vhd_path:
-            self._vmutils.detach_vm_disk(instance.name, rescue_vhd_path,
-                                         is_physical=False)
+            self._vmutils.detach_vm_disk(instance.name, rescue_vhd_path)
             fileutils.delete_if_exists(rescue_vhd_path)
         self._attach_drive(instance.name, root_vhd_path, 0,
                            self._ROOT_DISK_CTRL_ADDR, controller_type)
@@ -931,7 +929,7 @@ class VMOps(object):
         configdrive_path = self._pathutils.lookup_configdrive_path(
             instance.name)
         if configdrive_path and not self._vmutils.is_disk_attached(
-                configdrive_path, is_physical=False):
+                configdrive_path):
             self.attach_config_drive(instance, configdrive_path, vm_gen)
 
         self.power_on(instance)

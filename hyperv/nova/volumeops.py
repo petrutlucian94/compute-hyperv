@@ -275,52 +275,20 @@ class BaseVolumeDriver(object):
         ebs_root is True
         """
         serial = connection_info['serial']
-        # Getting the mounted disk
-        mounted_disk_path = self.get_disk_resource_path(connection_info)
+        disk_path = self.get_disk_resource_path(connection_info)
 
-        ctrller_path, slot = self._get_disk_ctrl_and_slot(instance_name,
-                                                          disk_bus)
-        if self._is_block_dev:
-            # We need to tag physical disk resources with the volume
-            # serial number, in order to be able to retrieve them
-            # during live migration.
-            self._vmutils.attach_volume_to_controller(instance_name,
-                                                      ctrller_path,
-                                                      slot,
-                                                      mounted_disk_path,
-                                                      serial=serial)
-        else:
-            self._vmutils.attach_drive(instance_name,
-                                       mounted_disk_path,
-                                       ctrller_path,
-                                       slot)
+        LOG.debug("Attaching disk %(disk_path)s to "
+                  "instance %(instance_name)s.", )
+        self._vmutils.attach_vm_disk(instance_name, disk_path, serial=serial)
 
     def detach_volume(self, connection_info, instance_name):
-        mounted_disk_path = self.get_disk_resource_path(connection_info)
+        disk_path = self.get_disk_resource_path(connection_info)
 
         LOG.debug("Detaching disk %(disk_path)s "
                   "from instance: %(instance_name)s",
-                  dict(disk_path=mounted_disk_path,
+                  dict(disk_path=disk_path,
                        instance_name=instance_name))
-        self._vmutils.detach_vm_disk(instance_name, mounted_disk_path,
-                                     is_physical=self._is_block_dev)
-
-    def _get_disk_ctrl_and_slot(self, instance_name, disk_bus):
-        if disk_bus == constants.CTRL_TYPE_IDE:
-            # Find the IDE controller for the vm.
-            ctrller_path = self._vmutils.get_vm_ide_controller(
-                instance_name, 0)
-            # Attaching to the first slot
-            slot = 0
-        elif disk_bus == constants.CTRL_TYPE_SCSI:
-            # Find the SCSI controller for the vm
-            ctrller_path = self._vmutils.get_vm_scsi_controller(
-                instance_name)
-            slot = self._vmutils.get_free_controller_slot(ctrller_path)
-        else:
-            err_msg = _("Unsupported disk bus requested: %s")
-            raise exception.Invalid(err_msg % disk_bus)
-        return ctrller_path, slot
+        self._vmutils.detach_vm_disk(instance_name, disk_path)
 
     def set_disk_qos_specs(self, connection_info, min_iops, max_iops):
         volume_type = connection_info.get('driver_volume_type', '')
@@ -339,13 +307,6 @@ class BaseVolumeDriver(object):
             err_msg = _("Could not find the physical disk "
                         "path for the requested volume.")
             raise exception.DiskNotFound(err_msg)
-
-    def _get_mounted_disk_path_by_dev_name(self, device_name):
-        device_number = self._diskutils.get_device_number_from_device_name(
-            device_name)
-        mounted_disk_path = self._vmutils.get_mounted_disk_by_drive_number(
-            device_number)
-        return mounted_disk_path
 
 
 class ISCSIVolumeDriver(BaseVolumeDriver):
@@ -480,7 +441,7 @@ class ISCSIVolumeDriver(BaseVolumeDriver):
 
         self._check_device_paths(device_paths)
         disk_path = list(device_paths)[0]
-        return self._get_mounted_disk_path_by_dev_name(disk_path)
+        return disk_path
 
 
 class SMBFSVolumeDriver(BaseVolumeDriver):
@@ -614,8 +575,7 @@ class FCVolumeDriver(BaseVolumeDriver):
                 if disk_paths:
                     self._check_device_paths(disk_paths)
                     disk_path = list(disk_paths)[0]
-                    return self._get_mounted_disk_path_by_dev_name(
-                        disk_path)
+                    return disk_path
 
             err_msg = _("Could not find the physical disk "
                         "path for the requested volume.")
