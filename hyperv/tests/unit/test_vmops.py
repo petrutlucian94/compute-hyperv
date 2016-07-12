@@ -12,6 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import ddt
 import os
 
 from eventlet import timeout as etimeout
@@ -41,6 +42,7 @@ from hyperv.tests.unit import test_base
 CONF = cfg.CONF
 
 
+@ddt.ddt
 class VMOpsTestCase(test_base.HyperVBaseTestCase):
     """Unit tests for the Hyper-V VMOps class."""
 
@@ -575,68 +577,62 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
     @mock.patch.object(vmops.volumeops.VolumeOps, 'attach_volumes')
     @mock.patch.object(vmops.VMOps, '_set_instance_disk_qos_specs')
     @mock.patch.object(vmops.VMOps, '_attach_root_device')
+    @mock.patch.object(vmops.VMOps, 'attach_ephemerals')
     @mock.patch.object(vmops.VMOps, '_get_image_serial_port_settings')
     @mock.patch.object(vmops.VMOps, '_create_vm_com_port_pipes')
-    @mock.patch.object(vmops.VMOps, '_attach_ephemerals')
     @mock.patch.object(vmops.VMOps, '_configure_remotefx')
+    @mock.patch.object(vmops.VMOps, 'get_instance_dynamic_memory_ratio')
     @mock.patch.object(vmops.VMOps, '_get_instance_vnuma_config')
     def _test_create_instance(self, mock_get_instance_vnuma_config,
-                              mock_configure_remotefx,
-                              mock_attach_ephemerals,
-                              mock_create_pipes,
-                              mock_get_port_settings,
-                              mock_attach_root_device,
-                              mock_set_qos_specs,
-                              mock_attach_volumes,
-                              mock_requires_certificate,
-                              mock_requires_secure_boot,
-                              mock_get_vif_driver,
+                              mock_get_dynamic_memory_ratio,
+                              mock_configure_remotefx, mock_create_pipes,
+                              mock_get_port_settings, mock_attach_ephemerals,
+                              mock_attach_root_device, mock_set_qos_specs,
+                              mock_attach_volumes, mock_requires_certificate,
+                              mock_requires_secure_boot, mock_get_vif_driver,
                               mock_configure_secure_vm,
                               enable_instance_metrics,
-                              vm_gen=constants.VM_GEN_1, vnuma_enabled=False,
+                              vm_gen=constants.VM_GEN_1,
                               requires_sec_boot=True):
         mock_vif_driver = mock_get_vif_driver()
         self.flags(dynamic_memory_ratio=2.0, group='hyperv')
         self.flags(enable_instance_metrics_collection=enable_instance_metrics,
                    group='hyperv')
+        mock_get_instance_vnuma_config.return_value = (
+            mock.sentinel.mem_per_numa_node, mock.sentinel.vnuma_cpus)
+        dynamic_memory_ratio = mock_get_dynamic_memory_ratio.return_value
         root_device_info = mock.sentinel.ROOT_DEV_INFO
         block_device_info = {'ephemerals': [], 'block_device_mapping': []}
         fake_network_info = {'id': mock.sentinel.ID,
                              'address': mock.sentinel.ADDRESS}
         mock_instance = fake_instance.fake_instance_obj(self.context)
         instance_path = os.path.join(CONF.instances_path, mock_instance.name)
-        mock_requires_secure_boot.return_value = True
-
-        if vnuma_enabled:
-            mock_get_instance_vnuma_config.return_value = (
-                mock.sentinel.mem_per_numa, mock.sentinel.cpus_per_numa)
-            cpus_per_numa = mock.sentinel.numa_cpus
-            mem_per_numa = mock.sentinel.mem_per_numa
-            dynamic_memory_ratio = 1.0
-        else:
-            mock_get_instance_vnuma_config.return_value = (None, None)
-            mem_per_numa, cpus_per_numa = (None, None)
-            dynamic_memory_ratio = CONF.hyperv.dynamic_memory_ratio
-
+        mock_requires_secure_boot.return_value = requires_sec_boot
         flavor = flavor_obj.Flavor(**test_flavor.fake_flavor)
         mock_instance.flavor = flavor
 
         self._vmops.create_instance(
-                context=self.context,
-                instance=mock_instance,
-                network_info=[fake_network_info],
-                block_device_info=block_device_info,
-                root_device=root_device_info,
-                vm_gen=vm_gen,
-                image_meta=mock.sentinel.image_meta)
+            context=self.context,
+            instance=mock_instance,
+            network_info=[fake_network_info],
+            block_device_info=block_device_info,
+            root_device=root_device_info,
+            vm_gen=vm_gen,
+            image_meta=mock.sentinel.image_meta)
+
+        mock_get_instance_vnuma_config.assert_called_once_with(
+            mock_instance, mock.sentinel.image_meta)
+        mock_get_dynamic_memory_ratio.assert_called_once_with(True)
+        mock_configure_remotefx.assert_called_once_with(mock_instance, vm_gen)
 
         self._vmops._vmutils.create_vm.assert_called_once_with(
-            mock_instance.name, vnuma_enabled, vm_gen,
-            instance_path, [mock_instance.uuid])
+            mock_instance.name, True, vm_gen, instance_path,
+            [mock_instance.uuid])
         self._vmops._vmutils.update_vm.assert_called_once_with(
-            mock_instance.name, mock_instance.flavor.memory_mb, mem_per_numa,
-            mock_instance.flavor.vcpus, cpus_per_numa,
-            CONF.hyperv.limit_cpu_features, dynamic_memory_ratio)
+            mock_instance.name, mock_instance.flavor.memory_mb,
+            mock.sentinel.mem_per_numa_node, mock_instance.flavor.vcpus,
+            mock.sentinel.vnuma_cpus, CONF.hyperv.limit_cpu_features,
+            dynamic_memory_ratio)
 
         mock_configure_remotefx.assert_called_once_with(mock_instance, vm_gen)
         mock_create_scsi_ctrl = self._vmops._vmutils.create_scsi_controller
@@ -730,7 +726,7 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
                        'ctrl_disk_addr': 0},
                       {'path': None}]
 
-        self._vmops._attach_ephemerals(mock_instance.name, ephemerals)
+        self._vmops.attach_ephemerals(mock_instance.name, ephemerals)
 
         mock_attach_drive.assert_has_calls(
             [mock.call(mock_instance.name, mock.sentinel.PATH1, 0,
@@ -2048,3 +2044,14 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
         self.assertRaises(exception.InstanceUnacceptable,
                           self._vmops._get_fsk_data,
                           mock_instance)
+
+    @ddt.data(True, False)
+    def test_get_instance_dynamic_memory_ratio(self, vnuma_enabled):
+        expected_dyn_memory_ratio = 2.0
+        self.flags(dynamic_memory_ratio=expected_dyn_memory_ratio,
+                   group='hyperv')
+        if vnuma_enabled:
+            expected_dyn_memory_ratio = 1.0
+
+        response = self._vmops.get_instance_dynamic_memory_ratio(vnuma_enabled)
+        self.assertEqual(expected_dyn_memory_ratio, response)

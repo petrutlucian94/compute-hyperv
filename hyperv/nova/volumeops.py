@@ -140,7 +140,8 @@ class VolumeOps(object):
         volume_driver.detach_volume(connection_info, instance_name)
         volume_driver.disconnect_volume(connection_info)
 
-    def fix_instance_volume_disk_paths(self, instance_name, block_device_info):
+    def fix_instance_volume_disk_paths(self, instance_name, block_device_info,
+                                       is_planned_vm=False):
         # Mapping containing the current disk paths for each volume.
         actual_disk_mapping = self.get_disk_path_mapping(block_device_info)
         if not actual_disk_mapping:
@@ -151,7 +152,7 @@ class VolumeOps(object):
         # associated with this resource may not be the right one,
         # as physical disk paths can get swapped after host reboots.
         vm_disk_mapping = self._vmutils.get_vm_physical_disk_mapping(
-            instance_name)
+            instance_name, is_planned_vm=is_planned_vm)
 
         for serial, vm_disk in vm_disk_mapping.items():
             actual_disk_path = actual_disk_mapping[serial]

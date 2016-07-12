@@ -224,6 +224,22 @@ class PathUtilsTestCase(test_base.HyperVBaseTestCase):
             self.fake_instance_name)
         self.assertIsNone(configdrive_path)
 
+    @mock.patch.object(pathutils.PathUtils, '_get_instances_sub_dir')
+    def test_get_export_dir(self, mock_get_instances_sub_dir):
+        expected_dir = os.path.join('export', self.fake_instance_name)
+
+        response = self._pathutils.get_export_dir(
+            self.fake_instance_name,
+            remote_server=mock.sentinel.remote_server,
+            create_dir=mock.sentinel.create_dir,
+            remove_dir=mock.sentinel.remove_dir)
+
+        self.assertEqual(mock_get_instances_sub_dir.return_value,
+                         response)
+        mock_get_instances_sub_dir.assert_called_once_with(
+            expected_dir, mock.sentinel.remote_server,
+            mock.sentinel.create_dir, mock.sentinel.remove_dir)
+
     def test_copy_vm_console_logs(self):
         fake_local_logs = [mock.sentinel.log_path,
                            mock.sentinel.archived_log_path]
@@ -320,3 +336,64 @@ class PathUtilsTestCase(test_base.HyperVBaseTestCase):
             [mock.call(), mock.call(mock.sentinel.dest)])
         mock_check_dirs_shared_storage.assert_called_once_with(
             mock.sentinel.local_inst_dir, mock.sentinel.remote_inst_dir)
+
+    @mock.patch.object(pathutils.PathUtils, 'get_export_dir')
+    def test_get_export_snapshot_dir(self, mock_get_export_dir):
+        mock_get_export_dir.return_value = "fake/path/export/dir"
+        expected_value = os.path.join(
+            mock_get_export_dir.return_value, "Snapshots")
+
+        response = self._pathutils.get_export_snapshot_dir(
+            self.fake_instance_name,
+            remote_server=mock.sentinel.remote_server)
+
+        self.assertEqual(expected_value, response)
+        mock_get_export_dir.assert_called_once_with(
+            self.fake_instance_name, mock.sentinel.remote_server,
+            create_dir=False, remove_dir=False)
+
+    @mock.patch('os.listdir')
+    @mock.patch.object(pathutils.PathUtils, 'get_export_dir')
+    def test_get_vm_config_file_path(self, mock_get_exp_dir,
+                                     mock_listdir):
+        fake_export_path = 'fake_export_path'
+        config_file = '81027A62-7187-4EC4-AFF5-9CA853BF7C68.vmcx'
+        vm_dir = os.path.join(fake_export_path, 'Virtual Machines')
+        mock_listdir.return_value = [config_file]
+        expected_path = os.path.join(vm_dir, config_file)
+
+        mock_get_exp_dir.return_value = fake_export_path
+
+        response = self._pathutils.get_vm_config_file_path(
+            self.fake_instance_name)
+        self.assertEqual(expected_path, response)
+
+        mock_get_exp_dir.assert_called_once_with(self.fake_instance_name,
+                                                 create_dir=False,
+                                                 remove_dir=False)
+
+    @mock.patch('os.listdir')
+    @mock.patch.object(pathutils.PathUtils, 'get_export_dir')
+    def test_get_vm_config_file_exception(self, mock_get_exp_dir,
+                                          mock_listdir):
+        fake_export_path = 'fake_export_path'
+        mock_get_exp_dir.return_value = fake_export_path
+        mock_listdir.return_value = []
+
+        self.assertRaises(exception.NotFound,
+                          self._pathutils.get_vm_config_file_path,
+                          self.fake_instance_name)
+
+        mock_get_exp_dir.assert_called_once_with(
+            self.fake_instance_name, create_dir=False, remove_dir=False)
+
+    @mock.patch.object(pathutils.PathUtils, 'get_instance_dir')
+    def test_get_instance_snapshot_dir(self, mock_get_instance_dir):
+        mock_get_instance_dir.return_value = self.fake_instance_dir
+        response = self._pathutils.get_instance_snapshot_dir(
+            self.fake_instance_name, remote_server=None)
+
+        expected_path = os.path.join(self.fake_instance_dir, 'Snapshots')
+        self.assertEqual(expected_path, response)
+        mock_get_instance_dir.assert_called_once_with(self.fake_instance_name,
+                                                      remote_server=None)

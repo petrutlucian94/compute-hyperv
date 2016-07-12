@@ -365,18 +365,9 @@ class VMOps(object):
 
         memory_per_numa_node, cpus_per_numa_node = (
             self._get_instance_vnuma_config(instance, image_meta))
-
-        if memory_per_numa_node:
-            if CONF.hyperv.dynamic_memory_ratio > 1.0:
-                LOG.warning(_LW(
-                    "Instance vNUMA topology requested, but dynamic memory "
-                    "ratio is higher than 1.0 in nova.conf. Ignoring dynamic "
-                    "memory ratio option."), instance=instance)
-            dynamic_memory_ratio = 1.0
-            vnuma_enabled = True
-        else:
-            dynamic_memory_ratio = CONF.hyperv.dynamic_memory_ratio
-            vnuma_enabled = False
+        vnuma_enabled = bool(memory_per_numa_node)
+        dynamic_memory_ratio = self.get_instance_dynamic_memory_ratio(
+            vnuma_enabled)
 
         self._vmutils.create_vm(instance_name,
                                 vnuma_enabled,
@@ -396,7 +387,7 @@ class VMOps(object):
 
         self._vmutils.create_scsi_controller(instance_name)
         self._attach_root_device(instance_name, root_device)
-        self._attach_ephemerals(instance_name, block_device_info['ephemerals'])
+        self.attach_ephemerals(instance_name, block_device_info['ephemerals'])
         self._volumeops.attach_volumes(
             block_device_info['block_device_mapping'], instance_name)
 
@@ -475,7 +466,7 @@ class VMOps(object):
                                root_dev_info['disk_bus'],
                                root_dev_info['type'])
 
-    def _attach_ephemerals(self, instance_name, ephemerals):
+    def attach_ephemerals(self, instance_name, ephemerals):
         for eph in ephemerals:
             # if an ephemeral doesn't have a path, it might have been removed
             # during resize.
@@ -662,6 +653,17 @@ class VMOps(object):
                            "topology.", instance_id=instance.uuid)
 
         return memory_per_numa_node, cpus_per_numa_node
+
+    def get_instance_dynamic_memory_ratio(self, vnuma_enabled):
+        dynamic_memory_ratio = CONF.hyperv.dynamic_memory_ratio
+        if vnuma_enabled:
+            if CONF.hyperv.dynamic_memory_ratio > 1.0:
+                LOG.warning(_LW(
+                    "Instance vNUMA topology requested, but dynamic memory "
+                    "ratio is higher than 1.0 in nova.conf. Ignoring dynamic "
+                    "memory ratio option."))
+            dynamic_memory_ratio = 1.0
+        return dynamic_memory_ratio
 
     def attach_config_drive(self, instance, configdrive_path, vm_gen):
         configdrive_ext = configdrive_path[(configdrive_path.rfind('.') + 1):]

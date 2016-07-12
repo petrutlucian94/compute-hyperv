@@ -23,6 +23,7 @@ from os_win import exceptions as os_win_exc
 from os_win.utils import pathutils
 from os_win import utilsfactory
 from oslo_log import log as logging
+from oslo_utils import uuidutils
 
 from hyperv.i18n import _, _LI
 from hyperv.nova import constants
@@ -181,10 +182,11 @@ class PathUtils(pathutils.PathUtils):
     def get_base_vhd_dir(self):
         return self._get_instances_sub_dir('_base')
 
-    def get_export_dir(self, instance_name):
+    def get_export_dir(self, instance_name, remote_server=None,
+                       create_dir=True, remove_dir=False):
         dir_name = os.path.join('export', instance_name)
-        return self._get_instances_sub_dir(dir_name, create_dir=True,
-                                           remove_dir=True)
+        return self._get_instances_sub_dir(dir_name, remote_server,
+                                           create_dir, remove_dir)
 
     def get_vm_console_log_paths(self, instance_name, remote_server=None):
         instance_dir = self.get_instance_dir(instance_name,
@@ -237,3 +239,31 @@ class PathUtils(pathutils.PathUtils):
         remote_inst_dir = self.get_instances_dir(dest)
         return self.check_dirs_shared_storage(local_inst_dir,
                                               remote_inst_dir)
+
+    def get_export_snapshot_dir(self, instance_name, remote_server=None):
+        export_path = self.get_export_dir(instance_name, remote_server,
+                                          create_dir=False, remove_dir=False)
+        return os.path.join(export_path, 'Snapshots')
+
+    def get_vm_config_file_path(self, instance_name):
+        export_path = self.get_export_dir(instance_name,
+                                          create_dir=False, remove_dir=False)
+        vm_dir = os.path.join(export_path, "Virtual Machines")
+        vm_files = os.listdir(vm_dir)
+        conf_file = [f for f in vm_files if
+                     os.path.splitext(f)[1].lower() in ['.vmcx', '.xml']
+                     and uuidutils.is_uuid_like(os.path.splitext(f)[0])]
+        if conf_file:
+            LOG.debug("Using %(conf_file)s export config file for "
+                      "instance %(instance_name)s",
+                      {'conf_file': conf_file[0],
+                       'instance_name': instance_name})
+            return os.path.join(vm_dir, conf_file[0])
+        raise exception.NotFound(
+            _("VM %s export directory doesn't contain any "
+              "configuration data file.") % instance_name)
+
+    def get_instance_snapshot_dir(self, instance_name, remote_server=None):
+        instance_dir = self.get_instance_dir(
+            instance_name, remote_server=remote_server)
+        return os.path.join(instance_dir, 'Snapshots')

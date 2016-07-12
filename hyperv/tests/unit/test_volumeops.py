@@ -103,7 +103,8 @@ class VolumeOpsTestCase(test_base.HyperVBaseTestCase):
     def test_fix_instance_volume_disk_paths_empty_bdm(self):
         self._volumeops.fix_instance_volume_disk_paths(
             mock.sentinel.instance_name,
-            block_device_info={})
+            block_device_info={},
+            is_planned_vm=mock.sentinel.is_planned_vm)
         self.assertFalse(
             self._volumeops._vmutils.get_vm_physical_disk_mapping.called)
 
@@ -138,10 +139,12 @@ class VolumeOpsTestCase(test_base.HyperVBaseTestCase):
 
         self._volumeops.fix_instance_volume_disk_paths(
             mock.sentinel.instance_name,
-            block_device_info)
+            block_device_info,
+            is_planned_vm=mock.sentinel.is_planned_vm)
 
         vmutils.get_vm_physical_disk_mapping.assert_called_once_with(
-            mock.sentinel.instance_name)
+            mock.sentinel.instance_name,
+            is_planned_vm=mock.sentinel.is_planned_vm)
         mock_get_disk_path_mapping.assert_called_once_with(
             block_device_info)
         vmutils.set_disk_host_res.assert_called_once_with(
