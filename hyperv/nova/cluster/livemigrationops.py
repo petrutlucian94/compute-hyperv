@@ -88,3 +88,5 @@ class ClusterLiveMigrationOps(livemigrationops.LiveMigrationOps):
         if not self._is_instance_clustered(instance.name):
             super(ClusterLiveMigrationOps, self).post_live_migration(
                 context, instance, block_device_info, migrate_data)
+
+        self._pathutils.remove_instance_dir_from_cache(instance.name)
