@@ -245,9 +245,13 @@ class PathUtils(pathutils.PathUtils):
                                           create_dir=False, remove_dir=False)
         return os.path.join(export_path, 'Snapshots')
 
-    def get_vm_config_file_path(self, instance_name):
-        export_path = self.get_export_dir(instance_name,
-                                          create_dir=False, remove_dir=False)
+    def get_vm_config_file_path(self, instance_name, use_export_dir=True):
+        # TODO(lpetrut): get rid of the export dir.
+        if use_export_dir:
+            export_path = self.get_export_dir(instance_name,
+                                              create_dir=False, remove_dir=False)
+        else:
+            export_path = self.get_instances_dir(instance_name, create_dir=False)
         vm_dir = os.path.join(export_path, "Virtual Machines")
         vm_files = os.listdir(vm_dir)
         conf_file = [f for f in vm_files if

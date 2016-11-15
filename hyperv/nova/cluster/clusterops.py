@@ -15,9 +15,13 @@
 
 """Management class for Cluster VM operations."""
 
+import platform
+
 from nova.compute import power_state
 from nova.compute import task_states
 from nova.compute import vm_states
+from nova.virt import driver
+from nova.volume import cinder
 import nova.conf
 from nova import context
 from nova import network
@@ -46,9 +50,15 @@ CONF.register_opts(hyperv_cluster_opts, 'hyperv')
 
 class ClusterOps(object):
 
-    def __init__(self):
+    def __init__(self, compute_driver):
+        self._compute_driver = compute_driver
+        self._volume_api = cinder.API()
+
         self._clustutils = utilsfactory.get_clusterutils()
         self._vmutils = utilsfactory.get_vmutils()
+        self._pathutils = utilsfactory.get_pathutils()
+        self._migrationutils = utilsfactory.get_migrationutils()
+
         self._clustutils.check_cluster_state()
         self._instance_map = {}
 
@@ -143,10 +153,7 @@ class ClusterOps(object):
                  {'instance': instance_name,
                   'host': new_host})
 
-        self._nova_failover_server(instance, new_host)
-        self._failover_migrate_networks(instance, old_host)
-        self._vmops.post_start_vifs(instance, nw_info)
-        self._serial_console_ops.start_console_handler(instance_name)
+        self._failover_instance(instance, old_host, nw_info)
 
     def _failover_migrate_networks(self, instance, source):
         """This is called after a VM failovered to this node.
@@ -203,20 +210,70 @@ class ClusterOps(object):
                 expected_attrs=expected_attrs):
             self._instance_map[server.name] = server.uuid
 
-    def _get_instance_block_device_mappings(self, instance):
+    def _get_instance_block_device_info(self, instance,
+                                        refresh_conn_info=False):
         """Transform block devices to the driver block_device format."""
         bdms = objects.BlockDeviceMappingList.get_by_instance_uuid(
             self._context, instance.uuid)
-        return [block_device.DriverVolumeBlockDevice(bdm) for bdm in bdms]
+        block_device_info = driver.get_block_device_info(instance, bdms)
 
-    def _nova_failover_server(self, instance, new_host):
-        if instance.vm_state == vm_states.ERROR:
-            # Sometimes during a failover nova can set the instance state
-            # to error depending on how much time the failover takes.
-            instance.vm_state = vm_states.ACTIVE
-        if instance.power_state == power_state.NOSTATE:
-            instance.power_state = power_state.RUNNING
+        if not refresh_conn_info:
+            # if the block_device_mapping has no value in connection_info
+            # (returned as None), don't include in the mapping
+            block_device_info['block_device_mapping'] = [
+                bdm for bdm in driver.block_device_info_get_mapping(
+                                    block_device_info)
+                if bdm.get('connection_info')]
+        else:
+            block_device.refresh_conn_infos(
+                driver.block_device_info_get_mapping(block_device_info),
+                self._context, instance,
+                self._volume_api,
+                self._compute_driver)
 
-        instance.host = new_host
-        instance.node = new_host
+    def _evacuate_instance(self, instance):
+        raise NotImplementedError()
+
+    def _failover_instance(self, instance, old_host, network_info):
+        # TODO: retrieve the expected new state based on the resource state.
+        # Based on that, we'll have to update the Nova instance status, as well
+        # as changing the vm power state, if needed.
+        # TODO: cleanup in case of errors (not sure if the cluster service will
+        # request a resource 'Terminate' in this case)
+
+        # if instance.vm_state == vm_states.ERROR:
+        #     # Sometimes during a failover nova can set the instance state
+        #     # to error depending on how much time the failover takes.
+        #     instance.vm_state = vm_states.ACTIVE
+        # if instance.power_state == power_state.NOSTATE:
+        #     instance.power_state = power_state.RUNNING
+
+        # This will also request Cinder to initiate volume connection.
+        # TODO: maybe disconnect the volumes from the old host?
+        # (call cinder to remove exports)
+        block_device_info = self._get_instance_block_device_info(
+            instance, refresh_conn_info=True)
+        self._volumeops.connect_volumes(block_device_info)
+
+        self._import_instance(instance)
+        self._volumeops.fix_instance_volume_disk_paths(
+            instance.name, block_device_info, is_planned_vm=True)
+        self._migrationutils.realize_vm(instance.name)
+
+        self._failover_migrate_networks(instance, old_host)
+
+        # platform.node is used so that this remains consistent
+        # to what we report to Nova.
+        instance.host = platform.node()
+        instance.node = platform.node()
         instance.save(expected_task_state=[None])
+
+        if new_power_state == power_state.RUNNING:
+            self._vmops.power_on(instance, network_info=network_info)
+
+    def _import_instance(self, instance):
+        snapshot_dir = self._pathutils.get_instance_snapshot_dir(instance.name)
+        config_file_path = self._pathutils.get_vm_config_file_path(
+            instance.name, use_export_dir=False)
+        self._migrationutils.import_vm_definition(config_file_path,
+                                                  snapshot_dir)

@@ -23,7 +23,7 @@ class HyperVClusterDriver(driver.HyperVDriver):
     def __init__(self, virtapi):
         super(HyperVClusterDriver, self).__init__(virtapi)
 
-        self._clops = clusterops.ClusterOps()
+        self._clops = clusterops.ClusterOps(self)
         self._livemigrationops = livemigrationops.ClusterLiveMigrationOps()
 
         self._clops.start_failover_listener_daemon()
