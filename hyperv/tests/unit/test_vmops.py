@@ -17,6 +17,7 @@ import os
 import ddt
 from eventlet import timeout as etimeout
 import mock
+from nova.compute import task_states
 from nova.compute import vm_states
 from nova import exception
 from nova import objects
@@ -76,6 +77,8 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
         self._vmops._serial_console_ops = mock.MagicMock()
         self._vmops._block_dev_man = mock.MagicMock()
         self._vmops._vif_driver = mock.MagicMock()
+
+        self._vmutils = self._vmops._vmutils
 
     def test_list_instances(self):
         mock_instance = mock.MagicMock()
@@ -2104,3 +2107,59 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
         self.assertRaises(exception.InstanceUnacceptable,
                           self._vmops._get_fsk_data,
                           mock_instance)
+
+    @ddt.data({'vm_state': os_win_const.HYPERV_VM_STATE_DISABLED},
+              {'vm_state': os_win_const.HYPERV_VM_STATE_SUSPENDED},
+              {'vm_state': os_win_const.HYPERV_VM_STATE_SUSPENDED,
+               'allow_paused': True},
+              {'vm_state': os_win_const.HYPERV_VM_STATE_PAUSED},
+              {'vm_state': os_win_const.HYPERV_VM_STATE_PAUSED,
+               'allow_paused': True},
+              {'allow_paused': True})
+    @ddt.unpack
+    @mock.patch.object(vmops.VMOps, 'pause')
+    @mock.patch.object(vmops.VMOps, 'suspend')
+    @mock.patch.object(vmops.VMOps, '_set_vm_state')
+    def test_prepare_for_volume_snapshot(
+            self, mock_set_state, mock_suspend, mock_pause,
+            vm_state=os_win_const.HYPERV_VM_STATE_ENABLED,
+            allow_paused=False):
+        mock_instance = mock.Mock(task_state=None)
+
+        self._vmops._vmutils.get_vm_state.return_value = vm_state
+
+        expect_instance_suspend = not allow_paused and vm_state not in [
+            os_win_const.HYPERV_VM_STATE_DISABLED,
+            os_win_const.HYPERV_VM_STATE_SUSPENDED]
+        expect_instance_pause = allow_paused and vm_state == (
+            os_win_const.HYPERV_VM_STATE_ENABLED)
+
+        with self._vmops.prepare_for_volume_snapshot(
+                mock_instance, allow_paused):
+            self.assertEqual(task_states.IMAGE_SNAPSHOT_PENDING,
+                             mock_instance.task_state)
+
+            self._vmutils.get_vm_state.assert_called_once_with(
+                mock_instance.name)
+
+            if expect_instance_suspend:
+                mock_suspend.assert_called_once_with(mock_instance)
+            else:
+                mock_suspend.assert_not_called()
+
+            if expect_instance_pause:
+                mock_pause.assert_called_once_with(mock_instance)
+            else:
+                mock_pause.assert_not_called()
+
+        # We expect the previous instance state to be restored.
+        if expect_instance_suspend or expect_instance_pause:
+            mock_set_state.assert_called_once_with(mock_instance, vm_state)
+        else:
+            mock_set_state.assert_not_called()
+
+        self.assertIsNone(mock_instance.task_state)
+        mock_instance.save.assert_has_calls(
+            [mock.call(expected_task_state=[None]),
+             mock.call(expected_task_state=[
+                 task_states.IMAGE_SNAPSHOT_PENDING])])

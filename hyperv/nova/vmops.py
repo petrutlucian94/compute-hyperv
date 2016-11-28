@@ -24,6 +24,7 @@ import time
 
 from eventlet import timeout as etimeout
 from nova.api.metadata import base as instance_metadata
+from nova.compute import task_states
 from nova.compute import vm_states
 import nova.conf
 from nova import exception
@@ -74,6 +75,7 @@ CONF.register_opts(hyperv_vm_opts, 'hyperv')
 SHUTDOWN_TIME_INCREMENT = 5
 REBOOT_TYPE_SOFT = 'SOFT'
 REBOOT_TYPE_HARD = 'HARD'
+
 
 VM_GENERATIONS = {
     constants.IMAGE_PROP_VM_GEN_1: constants.VM_GEN_1,
@@ -1292,3 +1294,32 @@ class VMOps(object):
         if not fsk_computer_name:
             fsk_pairs[fsk_computername_key] = instance.hostname
         return fsk_pairs
+
+    @contextlib.contextmanager
+    def prepare_for_volume_snapshot(self, instance, allow_paused=False):
+        set_previous_state = False
+        instance.task_state = task_states.IMAGE_SNAPSHOT_PENDING
+        instance.save(expected_task_state=[None])
+
+        try:
+            curr_state = self._vmutils.get_vm_state(instance.name)
+
+            allowed_states = [os_win_const.HYPERV_VM_STATE_DISABLED,
+                              os_win_const.HYPERV_VM_STATE_SUSPENDED]
+            if allow_paused:
+                allowed_states.append(os_win_const.HYPERV_VM_STATE_PAUSED)
+
+            if curr_state not in allowed_states:
+                if allow_paused:
+                    self.pause(instance)
+                else:
+                    self.suspend(instance)
+                set_previous_state = True
+            yield
+        finally:
+            if set_previous_state:
+                self._set_vm_state(instance, curr_state)
+
+            instance.task_state = None
+            instance.save(
+                expected_task_state=[task_states.IMAGE_SNAPSHOT_PENDING])
