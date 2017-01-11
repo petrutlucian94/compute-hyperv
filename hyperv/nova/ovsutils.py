@@ -31,9 +31,14 @@ from oslo_log import log as logging
 from hyperv.i18n import _LE
 
 LOG = logging.getLogger(__name__)
-
+net_cfg = [
+    cfg.IntOpt('ovs_vsctl_timeout',
+               default=120,
+               help='Amount of time, in seconds, that ovs_vsctl should wait '
+                    'for a response from the database. 0 is to wait forever.'),
+]
 CONF = cfg.CONF
-CONF.import_opt('ovs_vsctl_timeout', 'nova.conf.network')
+CONF.register_opts(net_cfg)
 
 
 def _ovs_vsctl(args):
