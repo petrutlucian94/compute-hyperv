@@ -57,9 +57,11 @@ class LiveMigrationOps(object):
                 self._pathutils.check_remote_instances_dir_shared(dest))
             if migrate_data:
                 migrate_data.is_shared_instance_path = shared_storage
+                migrate_data.is_shared_block_storage = shared_storage
             else:
-                migrate_data = migrate_data_obj.HyperVLiveMigrateData(
-                    is_shared_instance_path=shared_storage)
+                migrate_data = migrate_data_obj.LibvirtLiveMigrateData(
+                    is_shared_instance_path=shared_storage,
+                    is_shared_block_storage=shared_storage)
 
         try:
             # We must make sure that the console log workers are stopped,
@@ -133,10 +135,12 @@ class LiveMigrationOps(object):
         LOG.debug("check_can_live_migrate_destination called",
                   instance=instance_ref)
 
-        migrate_data = migrate_data_obj.HyperVLiveMigrateData()
-        migrate_data.is_shared_instance_path = (
-            self._pathutils.check_remote_instances_dir_shared(
-                instance_ref.host))
+        shared_storage = self._pathutils.check_remote_instances_dir_shared(
+            instance_ref.host)
+
+        migrate_data = migrate_data_obj.LibvirtLiveMigrateData()
+        migrate_data.is_shared_instance_path = shared_storage
+        migrate_data.is_shared_block_storage = shared_storage
         return migrate_data
 
     def check_can_live_migrate_destination_cleanup(self, ctxt,

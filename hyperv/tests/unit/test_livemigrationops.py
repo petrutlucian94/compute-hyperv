@@ -64,9 +64,10 @@ class LiveMigrationOpsTestCase(test_base.HyperVBaseTestCase):
         mock_check_shared_storage.return_value = shared_storage
 
         if migrate_data_received:
-            migrate_data = migrate_data_obj.HyperVLiveMigrateData()
+            migrate_data = migrate_data_obj.LibvirtLiveMigrateData()
             if migrate_data_version != '1.0':
                 migrate_data.is_shared_instance_path = shared_storage
+                migrate_data.is_shared_block_storage = shared_storage
         else:
             migrate_data = None
 
@@ -102,9 +103,11 @@ class LiveMigrationOpsTestCase(test_base.HyperVBaseTestCase):
             migrate_data_arg = post_call_args_list[-1]
             self.assertIsInstance(
                 migrate_data_arg,
-                migrate_data_obj.HyperVLiveMigrateData)
+                migrate_data_obj.LibvirtLiveMigrateData)
             self.assertEqual(shared_storage,
                              migrate_data_arg.is_shared_instance_path)
+            self.assertEqual(shared_storage,
+                             migrate_data_arg.is_shared_block_storage)
 
             if not migrate_data_received or migrate_data_version == '1.0':
                 mock_check_shared_storage.assert_called_once_with(fake_dest)
@@ -181,8 +184,9 @@ class LiveMigrationOpsTestCase(test_base.HyperVBaseTestCase):
     @mock.patch('hyperv.nova.volumeops.VolumeOps.disconnect_volumes')
     def test_post_live_migration(self, mock_disconnect_volumes,
                                  shared_storage=False):
-        migrate_data = migrate_data_obj.HyperVLiveMigrateData(
-            is_shared_instance_path=shared_storage)
+        migrate_data = migrate_data_obj.LibvirtLiveMigrateData(
+            is_shared_instance_path=shared_storage,
+            is_shared_block_storage=shared_storage)
 
         self._livemigrops.post_live_migration(
             self.context, mock.sentinel.instance,
@@ -208,7 +212,7 @@ class LiveMigrationOpsTestCase(test_base.HyperVBaseTestCase):
         mock_post_start_vifs.assert_called_once_with(
             mock.sentinel.instance, mock.sentinel.network_info)
 
-    @mock.patch.object(migrate_data_obj, 'HyperVLiveMigrateData')
+    @mock.patch.object(migrate_data_obj, 'LibvirtLiveMigrateData')
     def test_check_can_live_migrate_destination(self, mock_migr_data_cls):
         mock_instance = fake_instance.fake_instance_obj(self.context)
         migr_data = self._livemigrops.check_can_live_migrate_destination(
@@ -222,3 +226,5 @@ class LiveMigrationOpsTestCase(test_base.HyperVBaseTestCase):
         self.assertEqual(mock_migr_data_cls.return_value, migr_data)
         self.assertEqual(mock_check_shared_inst_dir.return_value,
                          migr_data.is_shared_instance_path)
+        self.assertEqual(mock_check_shared_inst_dir.return_value,
+                         migr_data.is_shared_block_storage)
