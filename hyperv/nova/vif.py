@@ -16,13 +16,23 @@
 
 import abc
 
-import nova.conf
+from nova.i18n import _
 from nova.network import model as network_model
 from os_win import utilsfactory
+from oslo_config import cfg
 
 from hyperv.nova import ovsutils
 
-CONF = nova.conf.CONF
+hyperv_opts = [
+    cfg.StrOpt('vswitch_name',
+               help='External virtual switch Name, '
+                    'if not provided, the first external virtual '
+                    'switch is used'),
+]
+
+CONF = cfg.CONF
+CONF.register_opts(hyperv_opts, 'hyperv')
+CONF.import_opt('network_api_class', 'nova.network')
 
 
 class HyperVBaseVIFDriver(object):
