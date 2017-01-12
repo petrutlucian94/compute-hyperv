@@ -139,8 +139,9 @@ class LiveMigrationOps(object):
                 instance_ref.host))
         return migrate_data
 
-    def cleanup_live_migration_destination_check(self, ctxt, dest_check_data):
-        LOG.debug("cleanup_live_migration_destination_check called")
+    def check_can_live_migrate_destination_cleanup(self, ctxt,
+                                                   dest_check_data):
+        LOG.debug("check_can_live_migrate_destination_cleanup called")
 
     def check_can_live_migrate_source(self, ctxt, instance_ref,
                                       dest_check_data):
