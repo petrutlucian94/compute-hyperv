@@ -57,7 +57,7 @@ class MigrationOps(object):
             instance_name,
             remove_dir=True, create_dir=True)
         revert_path = self._pathutils.get_instance_migr_revert_dir(
-            instance_name, remove_dir=True, create_dir=True)
+            instance_name, remove_dir=True)
 
         # We destroy the instance so that the instance dir may be moved. Also,
         # we fetch the instane dir first as we rely on the instance to exist
@@ -77,7 +77,8 @@ class MigrationOps(object):
                 })
 
             # TODO(lpetrut): we should switch to using win32 api when os-win
-            # supports this.
+            # supports this. The revert dir must not exist, otherwise the
+            # instance dir will be moved inside that one.
             shutil.move(instance_path, revert_path)
             return disk_info
         except Exception:
@@ -91,6 +92,7 @@ class MigrationOps(object):
             if temp_path and self._pathutils.exists(temp_path):
                 self._pathutils.rmtree(temp_path)
             if self._pathutils.exists(revert_path):
+                self._pathutils.check_remove_dir(instance_path)
                 shutil.move(revert_path, instance_path)
         except Exception as ex:
             # Log and ignore this exception
