@@ -319,6 +319,10 @@ class VolumeOps(object):
             instance.save(
                 expected_task_state=[task_states.IMAGE_SNAPSHOT_PENDING])
 
+    def get_disk_attachment_info(self, connection_info):
+        volume_driver = self._get_volume_driver(connection_info)
+        return volume_driver.get_disk_attachment_info(connection_info)
+
 
 class BaseVolumeDriver(object):
     _is_block_dev = True
@@ -455,6 +459,18 @@ class BaseVolumeDriver(object):
 
     def delete_snapshot(self, connection_info, instance, delete_info):
         raise NotImplementedError()
+
+    def get_disk_attachment_info(self, connection_info):
+        if not self._is_block_dev:
+            disk_path = self.get_disk_resource_path(connection_info)
+            serial = None
+        else:
+            disk_path = None
+            serial = connection_info['serial']
+
+        return self._vmutils.get_disk_attachment_info(disk_path,
+                                                      self._is_block_dev,
+                                                      serial=serial)
 
 
 class ISCSIVolumeDriver(BaseVolumeDriver):

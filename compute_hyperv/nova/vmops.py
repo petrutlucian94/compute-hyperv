@@ -233,6 +233,9 @@ class VMOps(object):
                 instance.name, eph['format'], eph_name)
             self.create_ephemeral_disk(instance.name, eph)
 
+            self._block_dev_man.update_eph_bdm_conn_info(eph,
+                                                         eph_name=eph_name)
+
     def create_ephemeral_disk(self, instance_name, eph_info):
         self._vhdutils.create_dynamic_vhd(eph_info['path'],
                                           eph_info['size'] * units.Gi)
@@ -252,20 +255,25 @@ class VMOps(object):
 
         return vif_metadata
 
-    def _save_device_metadata(self, context, instance, block_device_info):
+    def update_device_metadata(self, context, instance, save=True):
         """Builds a metadata object for instance devices, that maps the user
            provided tag to the hypervisor assigned device address.
         """
         metadata = []
 
-        metadata.extend(self._get_vif_metadata(context, instance.uuid))
-        if block_device_info:
-            metadata.extend(self._block_dev_man.get_bdm_metadata(
-                context, instance, block_device_info))
+        try:
+            metadata.extend(self._get_vif_metadata(context, instance.uuid))
+            metadata.extend(self._block_dev_man.get_bdm_metadata(context,
+                                                                 instance))
 
-        if metadata:
             instance.device_metadata = objects.InstanceDeviceMetadata(
                 devices=metadata)
+            if save:
+                instance.save()
+        except Exception:
+            # We're treating such exceptions as soft errors for now.
+            LOG.exception("Failed to update instance device metadata.",
+                          instance=instance)
 
     def set_boot_order(self, instance_name, vm_gen, block_device_info):
         boot_order = self._block_dev_man.get_boot_order(
@@ -294,6 +302,7 @@ class VMOps(object):
         self._block_dev_man.validate_and_update_bdi(
             instance, image_meta, vm_gen, block_device_info)
         root_device = block_device_info['root_disk']
+
         self._create_root_device(context, instance, root_device, vm_gen)
         self._create_ephemerals(instance, block_device_info['ephemerals'])
 
@@ -305,7 +314,7 @@ class VMOps(object):
                 # This is supported starting from OVS version 2.5
                 self.plug_vifs(instance, network_info)
 
-            self._save_device_metadata(context, instance, block_device_info)
+            self.update_device_metadata(context, instance)
 
             if configdrive.required_by(instance):
                 configdrive_path = self._create_config_drive(context,

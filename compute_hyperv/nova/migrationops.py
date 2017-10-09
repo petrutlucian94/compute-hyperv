@@ -399,6 +399,9 @@ class MigrationOps(object):
                     # ephemerals should have existed.
                     raise exception.DiskNotFound(location=eph['path'])
 
+                self._block_dev_man.update_eph_bdm_conn_info(eph,
+                                                             eph_name=eph_name)
+
                 if eph['size']:
                     # create ephemerals
                     self._vmops.create_ephemeral_disk(instance.name, eph)

@@ -21,6 +21,7 @@ import functools
 import platform
 import sys
 
+from nova import context as nova_context
 from nova import exception
 from nova import image
 from nova.virt import driver
@@ -29,6 +30,7 @@ from os_win import utilsfactory
 from oslo_log import log as logging
 import six
 
+from compute_hyperv.nova import block_device_manager
 from compute_hyperv.nova import eventhandler
 from compute_hyperv.nova import hostops
 from compute_hyperv.nova import imagecache
@@ -109,6 +111,8 @@ class HyperVDriver(driver.ComputeDriver):
 
         super(HyperVDriver, self).__init__(virtapi)
 
+        self._block_dev_man = (
+            block_device_manager.BlockDeviceInfoManager())
         self._hostops = hostops.HostOps()
         self._volumeops = volumeops.VolumeOps()
         self._vmops = vmops.VMOps(virtapi)
@@ -179,13 +183,20 @@ class HyperVDriver(driver.ComputeDriver):
 
     def attach_volume(self, context, connection_info, instance, mountpoint,
                       disk_bus=None, device_type=None, encryption=None):
-        return self._volumeops.attach_volume(connection_info,
-                                             instance.name)
+        self._volumeops.attach_volume(connection_info,
+                                      instance.name)
+        self._block_dev_man.append_volume_device_metadata(
+            context, instance, connection_info)
 
     def detach_volume(self, connection_info, instance, mountpoint,
                       encryption=None):
-        return self._volumeops.detach_volume(connection_info,
-                                             instance.name)
+        self._volumeops.detach_volume(connection_info,
+                                      instance.name)
+
+        # The nova compute manager only updates the device metadata in
+        # case of tagged devices. We're including untagged devices as well.
+        context = nova_context.get_admin_context()
+        self._vmops.update_device_metadata(context, instance)
 
     def get_volume_connector(self, instance):
         return self._volumeops.get_volume_connector()
@@ -366,10 +377,12 @@ class HyperVDriver(driver.ComputeDriver):
         self._imagecache.update(context, all_instances)
 
     def attach_interface(self, context, instance, image_meta, vif):
-        return self._vmops.attach_interface(instance, vif)
+        self._vmops.attach_interface(instance, vif)
+        self._vmops.update_device_metadata(context, instance)
 
     def detach_interface(self, context, instance, vif):
-        return self._vmops.detach_interface(instance, vif)
+        self._vmops.detach_interface(instance, vif)
+        self._vmops.update_device_metadata(context, instance)
 
     def rescue(self, context, instance, network_info, image_meta,
                rescue_password):

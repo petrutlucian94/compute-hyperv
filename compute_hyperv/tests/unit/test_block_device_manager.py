@@ -24,23 +24,51 @@ from compute_hyperv.tests.unit import test_base
 class BlockDeviceManagerTestCase(test_base.HyperVBaseTestCase):
     """Unit tests for the Hyper-V BlockDeviceInfoManager class."""
 
+    _FAKE_CONN_INFO = {
+        'serial': mock.sentinel.volume_id
+    }
+
     def setUp(self):
         super(BlockDeviceManagerTestCase, self).setUp()
         self._bdman = block_device_manager.BlockDeviceInfoManager()
+        self._bdman._volops = mock.Mock()
 
-    def test_get_device_bus_scsi(self):
-        bdm = {'disk_bus': constants.CTRL_TYPE_SCSI,
-               'drive_addr': 0, 'ctrl_disk_addr': 2}
+    def test_get_device_bus(self, controller_type):
+        attachment_info = dict(controller_type=controller_type,
+                               controller_addr=1,
+                               controller_slot=3)
+        self._bdman._volops.return_value = attachment_info
 
-        bus = self._bdman._get_device_bus(bdm)
-        self.assertEqual('0:0:0:2', bus.address)
+        bus = self._bdman._get_device_bus(mock.sentinel.connection_info)
 
-    def test_get_device_bus_ide(self):
-        bdm = {'disk_bus': constants.CTRL_TYPE_IDE,
-               'drive_addr': 0, 'ctrl_disk_addr': 1}
+        if controller_type == constants.CTRL_TYPE_SCSI:
+            exp_addr = '0:0:%s:%s' % (attachment_info['controller_addr'],
+                                      attachment_info['controller_slot'])
+            exp_cls = objects.SCSIDeviceBus
+        else:
+            exp_addr = '%s:%s' % (attachment_info['controller_addr'],
+                                  attachment_info['controller_slot'])
+            exp_cls = objects.IDEDeviceBus
 
-        bus = self._bdman._get_device_bus(bdm)
-        self.assertEqual('0:1', bus.address)
+        self.assertIsInstance(exp_cls, bus)
+        self.assertEqual(exp_addr, bus.address)
+
+    @mock.patch.object(block_device_manager.BlockDeviceInfoManager,
+                       '_get_device_bus')
+    @mock.patch.object(objects, 'DiskMetadata')
+    def test_get_volume_device_metadata(self, disk_metadata_cls,
+                                        mock_get_device_bus):
+        dev_metadata = self._bdman._get_volume_device_metadata(
+            self._FAKE_CONN_INFO,
+            mock.sentinel.volume_id,
+            mock.sentinel.tags)
+
+        self.assertEqual(disk_metadata_cls.return_value, dev_metadata)
+        disk_metadata_cls.assert_called_once_with(
+            bus=mock_get_device_bus.return_value,
+            tags=mock.sentinel.tags,
+            serial=mock.sentinel.volume_id)
+        mock_get_device_bus.assert_called_once_with(self._FAKE_CONN_INFO)
 
     @staticmethod
     def _bdm_mock(**kwargs):
