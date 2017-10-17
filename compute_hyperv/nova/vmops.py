@@ -233,9 +233,6 @@ class VMOps(object):
                 instance.name, eph['format'], eph_name)
             self.create_ephemeral_disk(instance.name, eph)
 
-            self._block_dev_man.update_eph_bdm_conn_info(eph,
-                                                         eph_name=eph_name)
-
     def create_ephemeral_disk(self, instance_name, eph_info):
         self._vhdutils.create_dynamic_vhd(eph_info['path'],
                                           eph_info['size'] * units.Gi)
@@ -619,6 +616,10 @@ class VMOps(object):
                     eph['ctrl_disk_addr'], eph['disk_bus'],
                     constants.BDI_DEVICE_TYPE_TO_DRIVE_TYPE[
                         eph['device_type']])
+
+                filename = os.path.basename(eph['path'])
+                self._block_dev_man.update_bdm_connection_info(
+                    eph._bdm_obj, eph_filename=filename)
 
     def _attach_drive(self, instance_name, path, drive_addr, ctrl_disk_addr,
                       controller_type, drive_type=constants.DISK):

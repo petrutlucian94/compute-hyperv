@@ -18,6 +18,8 @@ Handling of block device information and mapping
 Module contains helper methods for dealing with block device information
 """
 
+import os
+
 from nova import block_device
 from nova import exception
 from nova import objects
@@ -26,11 +28,13 @@ from nova.virt import configdrive
 from nova.virt import driver
 from os_win import constants as os_win_const
 from os_win import exceptions as os_win_exc
+from os_win import utilsfactory
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
 
 from compute_hyperv.i18n import _
 from compute_hyperv.nova import constants
+from compute_hyperv.nova import pathutils
 from compute_hyperv.nova import volumeops
 
 LOG = logging.getLogger(__name__)
@@ -52,6 +56,9 @@ class BlockDeviceInfoManager(object):
 
     def __init__(self):
         self._volops = volumeops.VolumeOps()
+        self._pathutils = pathutils.PathUtils()
+
+        self._vmutils = utilsfactory.get_vmutils()
 
     def _get_device_bus(self, ctrl_type, ctrl_addr, ctrl_slot):
         """Determines the device bus and it's hypervisor assigned address.
@@ -80,26 +87,22 @@ class BlockDeviceInfoManager(object):
         return attachment_info
 
     def _get_eph_bdm_attachment_info(self, instance, bdm):
-        try:
-            drv_eph_bdm = driver_block_device.convert_ephemerals(bdm)[0]
-        except IndexError:
-            return
-
         # When attaching ephemeral disks, we're setting this field so that
         # we can map them with bdm objects.
-        connection_info = drv_eph_bdm['connection_info'] or {}
-        eph_name = connection_info.get("eph_name")
-        if not eph_name:
-            LOG.warning("Missing ephemeral disk name in BDM connection info.")
+        connection_info = self.get_bdm_connection_info(bdm)
+        eph_filename = connection_info.get("eph_filename")
+        if not eph_filename:
+            LOG.warning("Missing ephemeral disk filename in "
+                        "BDM connection info.")
             return
 
-        eph_path = self._pathutils.lookup_ephemeral_vhd_path(instance.name,
-                                                             eph_name)
-        if not eph_path:
-            LOG.warning("Could not find ephemeral disk %s.", eph_name)
+        eph_path = os.path.join(
+            self._pathutils.get_instance_dir(instance.name), eph_filename)
+        if not os.path.exists(eph_path):
+            LOG.warning("Could not find ephemeral disk %s.", eph_path)
 
-        return self._get_disk_attachment_info(eph_path,
-                                              is_physical=False)
+        return self._vmutils.get_disk_attachment_info(eph_path,
+                                                      is_physical=False)
 
     def _get_disk_metadata(self, instance, bdm):
         attachment_info = None
@@ -136,55 +139,45 @@ class BlockDeviceInfoManager(object):
         for bdm in bdms:
             try:
                 device_metadata = self._get_disk_metadata(instance, bdm)
-                bdm_metadata.append(device_metadata)
+                if device_metadata:
+                    bdm_metadata.append(device_metadata)
             except (exception.DiskNotFound, os_win_exc.DiskNotFound):
-                LOG.debug("Could not find volume '%s' attachment while "
+                LOG.debug("Could not find disk attachment while "
                           "updating device metadata. It may have been "
-                          "detached.", bdm.volume_id)
+                          "detached. BDM: %s", bdm)
 
         return bdm_metadata
 
-    def append_volume_device_metadata(self, context, instance, connection_info,
-                                      save=True):
+    def set_volume_bdm_connection_info(self, context, instance, connection_info):
         # When attaching volumes to already existing instances, the connection
         # info passed to the driver is not saved yet within the BDM table.
-        # For this reason, we need to handle such disks individually.
+        #
+        # Nova sets the volume id within the connection info using the
+        # 'serial' key.
+        volume_id = connection_info['serial']
+        bdm = objects.BlockDeviceMapping.get_by_volume_and_instance(
+            context, volume_id, instance.uuid)
+        bdm.connection_info = jsonutils.dumps(connection_info)
+        bdm.save()
+
+    def get_bdm_connection_info(self, bdm):
+        # We're using the BDM 'connection_info' field to store ephemeral
+        # image information so that we can map them. In order to do so,
+        # we're using this helper.
+        # The ephemeral bdm object wrapper does not currently expose this
+        # field.
         try:
-            # Nova sets the volume id within the connection info using the
-            # 'serial' key.
-            volume_id = connection_info['serial']
-            bdm = objects.BlockDeviceMapping.get_by_volume_and_instance(
-                context, volume_id, instance.uuid)
+            conn_info = jsonutils.loads(bdm.connection_info)
+        except TypeError:
+            conn_info = {}
 
-            device_metadata = self._get_disk_metadata(instance, bdm)
-            instance.device_metadata.devices.append(device_metadata)
-            if save:
-                instance.save()
-        except Exception:
-            LOG.exception("Failed to update instance device metadata.",
-                          instance=instance)
+        return conn_info
 
-    def update_eph_bdm_conn_info(self, bdm, **kwargs):
-        # We're using the BDM 'connection_info' field to store the image
-        # location. Otherwise, we can't map actual ephemeral disks and
-        # BDM objects.
-        if isinstance(bdm, driver_block_device.DriverEphemeralBlockDevice):
-            # At the moment, 'connection_info' changes do not get propagated
-            # to the actual bdm object.
-            bdm_obj = bdm._bdm_obj
-            conn_info = bdm.connection_info or {}
-            bdm.connection_info = conn_info
-        elif isinstance(bdm, objects.BlockDeviceMapping):
-            bdm_obj = bdm
-
-            try:
-                conn_info = jsonutils.loads(bdm_obj.connection_info)
-            except TypeError:
-                conn_info = {}
-
+    def update_bdm_connection_info(self, bdm, **kwargs):
+        conn_info = self.get_bdm_connection_info(bdm)
         conn_info.update(**kwargs)
-        bdm_obj.connection_info = jsonutils.dumps(conn_info)
-        bdm_obj.save()
+        bdm.connection_info = jsonutils.dumps(conn_info)
+        bdm.save()
 
     def _initialize_controller_slot_counter(self, instance, vm_gen):
         # we have 2 IDE controllers, for a total of 4 slots

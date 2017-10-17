@@ -102,6 +102,8 @@ class HyperVDriver(driver.ComputeDriver):
         "supports_migrate_to_same_host": False,
         "supports_attach_interface": True,
         "supports_device_tagging": True,
+        "supports_tagged_attach_interface": True,
+        "supports_tagged_attach_volume": True,
     }
 
     def __init__(self, virtapi):
@@ -185,8 +187,9 @@ class HyperVDriver(driver.ComputeDriver):
                       disk_bus=None, device_type=None, encryption=None):
         self._volumeops.attach_volume(connection_info,
                                       instance.name)
-        self._block_dev_man.append_volume_device_metadata(
+        self._block_dev_man.set_volume_bdm_connection_info(
             context, instance, connection_info)
+        self._vmops.update_device_metadata(context, instance)
 
     def detach_volume(self, connection_info, instance, mountpoint,
                       encryption=None):
@@ -381,8 +384,8 @@ class HyperVDriver(driver.ComputeDriver):
         self._vmops.update_device_metadata(context, instance)
 
     def detach_interface(self, context, instance, vif):
+        # The device metadata gets updated outside the driver.
         self._vmops.detach_interface(instance, vif)
-        self._vmops.update_device_metadata(context, instance)
 
     def rescue(self, context, instance, network_info, image_meta,
                rescue_password):
