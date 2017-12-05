@@ -800,7 +800,8 @@ class VMOps(object):
                 self._pathutils.remove(configdrive_path)
 
     @serialconsoleops.instance_synchronized
-    def _delete_disk_files(self, instance_name, instance_path=None):
+    def _delete_disk_files(self, instance_name, instance_path=None,
+                           cleanup_migration_files=True):
         # We want to avoid the situation in which serial console workers
         # are started while we perform this operation, preventing us from
         # deleting the instance log files (bug #1556189). This can happen
@@ -815,8 +816,12 @@ class VMOps(object):
 
         self._pathutils.check_remove_dir(instance_path)
 
+        if cleanup_migration_files:
+            self._pathutils.get_instance_migr_revert_dir(
+                instance_path, remove_dir=True)
+
     def destroy(self, instance, network_info, block_device_info,
-                destroy_disks=True):
+                destroy_disks=True, cleanup_migration_files=True):
         instance_name = instance.name
         LOG.info("Got request to destroy instance", instance=instance)
 
@@ -844,7 +849,8 @@ class VMOps(object):
             self._volumeops.disconnect_volumes(block_device_info)
 
             if destroy_disks:
-                self._delete_disk_files(instance_name, instance_path)
+                self._delete_disk_files(instance_name, instance_path,
+                                        cleanup_migration_files)
         except Exception:
             with excutils.save_and_reraise_exception():
                 LOG.exception('Failed to destroy instance: %s', instance_name)
