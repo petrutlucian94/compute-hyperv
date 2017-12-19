@@ -301,8 +301,6 @@ class VMOps(object):
                 # waiting will occur after the instance is created.
                 self.create_instance(context, instance, network_info,
                                      block_device_info, vm_gen, image_meta)
-                # This is supported starting from OVS version 2.5
-                self.plug_vifs(instance, network_info)
 
             self.update_device_metadata(context, instance)
 
@@ -321,6 +319,8 @@ class VMOps(object):
             self.power_on(instance,
                           network_info=network_info,
                           should_plug_vifs=False)
+            # This is supported starting from OVS version 2.5
+            self.plug_vifs(instance, network_info)
         except Exception:
             with excutils.save_and_reraise_exception():
                 self.destroy(instance, network_info, block_device_info)
