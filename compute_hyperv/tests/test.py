@@ -85,10 +85,12 @@ class NoDBTestCase(base.BaseTestCase):
     """
 
     TIMEOUT_SCALING_FACTOR = 1
+    MOCK_TOOZ = True
 
     def setUp(self):
         """Run before each test method to initialize test environment."""
         super(NoDBTestCase, self).setUp()
+
         self.useFixture(mock_fixture.MockAutospecFixture())
         self.useFixture(nova_fixtures.Timeout(
             os.environ.get('OS_TEST_TIMEOUT', 0),
@@ -111,6 +113,11 @@ class NoDBTestCase(base.BaseTestCase):
 
         self.useFixture(nova_fixtures.PoisonFunctions())
 
+        if self.MOCK_TOOZ:
+            self.patch('compute_hyperv.nova.coordination.Coordinator.start')
+            self.patch('compute_hyperv.nova.coordination.Coordinator.stop')
+            self.patch('compute_hyperv.nova.coordination.Coordinator.get_lock')
+
     def _clear_attrs(self):
         # Delete attributes that don't start with _ so they don't pin
         # memory around unnecessarily for the duration of the test
@@ -123,6 +130,12 @@ class NoDBTestCase(base.BaseTestCase):
         group = kw.pop('group', None)
         for k, v in six.iteritems(kw):
             CONF.set_override(k, v, group)
+
+    def patch(self, path, *args, **kwargs):
+        patcher = mock.patch(path, *args, **kwargs)
+        result = patcher.start()
+        self.addCleanup(patcher.stop)
+        return result
 
     def assertPublicAPISignatures(self, baseinst, inst):
         def get_public_apis(inst):
