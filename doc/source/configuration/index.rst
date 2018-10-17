@@ -187,6 +187,28 @@ configured. For this, check the `nova PCI passthrough configuration guide`__.
 __ https://docs.openstack.org/nova/queens/admin/pci-passthrough.html
 
 
+Distributed locking configuration
+---------------------------------
+
+In order to avoid race conditions, our driver relies on distributed locks. A
+distributed lock backend such as etcd, mysql or a file share will have to be
+configured.
+
+The following configuration will use etcd 3 as a lock backend:
+
+.. code-block:: ini
+
+    [coordination]
+    backend_url = etcd3+http://etcd_address:2379
+
+In order to use a file share, set the following:
+
+.. code-block:: ini
+
+    [coordination]
+    backend_url = file:////share_addr/share_name
+
+
 Configuration options
 ---------------------
 
